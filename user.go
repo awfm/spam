@@ -4,12 +4,10 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
-	"time"
 
 	"github.com/onflow/flow-go-sdk"
 	"github.com/onflow/flow-go-sdk/client"
 	"github.com/onflow/flow-go-sdk/crypto"
-	"github.com/onflow/flow-go-sdk/templates"
 )
 
 type User struct {
@@ -22,7 +20,7 @@ func NewRoot(cli *client.Client, hex string) (*User, error) {
 
 	priv, err := crypto.DecodePrivateKeyHex(crypto.ECDSA_P256, hex)
 	if err != nil {
-		return nil, fmt.Errorf("could not decode private hex key: %w", err)
+		return nil, fmt.Errorf("could not decode private key: %w", err)
 	}
 
 	address := flow.HexToAddress("01")
@@ -45,7 +43,7 @@ func NewRandom(cli *client.Client, root *User) (*User, error) {
 	seed := make([]byte, crypto.MinSeedLength)
 	_, err := rand.Read(seed)
 	if err != nil {
-		return nil, fmt.Errorf("could not generate random seed: %w", err)
+		return nil, fmt.Errorf("could not generate seed: %w", err)
 	}
 
 	priv, err := crypto.GeneratePrivateKey(crypto.ECDSA_P256, seed)
@@ -58,22 +56,18 @@ func NewRandom(cli *client.Client, root *User) (*User, error) {
 		SetHashAlgo(crypto.SHA3_256).
 		SetWeight(flow.AccountKeyWeightThreshold)
 
-	script, err := templates.CreateAccount([]*flow.AccountKey{pub}, nil)
+	promise, err := root.RunCode(
+		LoadCreation(pub),
+	)
 	if err != nil {
-		return nil, fmt.Errorf("could not generate account creation script: %w", err)
+		return nil, fmt.Errorf("could not run code: %w", err)
 	}
 
-	txID, err := root.ExecuteScript(script)
+	address, err := promise.Address()
 	if err != nil {
-		return nil, fmt.Errorf("could not execute script: %w", err)
+		return nil, fmt.Errorf("could not get address: %w", err)
 	}
 
-	event, err := root.GetEvent(txID, flow.EventAccountCreated)
-	if err != nil {
-		return nil, fmt.Errorf("could not get transaction result: %w", err)
-	}
-
-	address := flow.AccountCreatedEvent(event).Address()
 	account, err := cli.GetAccount(context.Background(), address)
 	if err != nil {
 		return nil, fmt.Errorf("could not get account: %w", err)
@@ -88,6 +82,10 @@ func NewRandom(cli *client.Client, root *User) (*User, error) {
 	return u, nil
 }
 
+func (u *User) String() string {
+	return u.Address().Short()
+}
+
 func (u *User) Address() flow.Address {
 	return u.account.Address
 }
@@ -96,23 +94,40 @@ func (u *User) Pub() *flow.AccountKey {
 	return u.account.Keys[0]
 }
 
-func (u *User) ID() int {
-	return u.Pub().ID
-}
-
-func (u *User) Seq() uint64 {
-	return u.Pub().SequenceNumber
-}
-
-func (u *User) Algo() crypto.HashAlgorithm {
-	return u.Pub().HashAlgo
-}
-
 func (u *User) Signer() crypto.Signer {
-	return crypto.NewInMemorySigner(u.priv, u.Algo())
+	return crypto.NewInMemorySigner(u.priv, u.Pub().HashAlgo)
 }
 
-func (u *User) ExecuteScript(script []byte) (flow.Identifier, error) {
+func (u *User) Refresh() error {
+	account, err := u.cli.GetAccount(context.Background(), u.Address())
+	if err != nil {
+		return fmt.Errorf("could not get account: %w", err)
+	}
+	u.account = account
+	return nil
+}
+
+func (u *User) RunCode(load LoadFunc, signs ...AuthFunc) (*Promise, error) {
+
+	code, err := load()
+	if err != nil {
+		return nil, fmt.Errorf("could not load code: %w", err)
+	}
+
+	txID, err := u.SendTransaction(code, signs...)
+	if err != nil {
+		return nil, fmt.Errorf("could not execute code: %w", err)
+	}
+
+	return NewPromise(u.cli, txID), nil
+}
+
+func (u *User) SendTransaction(code []byte, signs ...AuthFunc) (flow.Identifier, error) {
+
+	err := u.Refresh()
+	if err != nil {
+		return flow.ZeroID, fmt.Errorf("could not refresh account: %w", err)
+	}
 
 	header, err := u.cli.GetLatestBlockHeader(context.Background(), false)
 	if err != nil {
@@ -120,12 +135,19 @@ func (u *User) ExecuteScript(script []byte) (flow.Identifier, error) {
 	}
 
 	tx := flow.NewTransaction().
-		SetScript(script).
+		SetScript(code).
 		SetReferenceBlockID(header.ID).
-		SetProposalKey(u.Address(), u.ID(), u.Seq()).
+		SetProposalKey(u.Address(), u.Pub().ID, u.Pub().SequenceNumber).
 		SetPayer(u.Address())
 
-	err = tx.SignEnvelope(u.Address(), u.ID(), u.Signer())
+	for _, sign := range signs {
+		err = sign(tx)
+		if err != nil {
+			return flow.ZeroID, fmt.Errorf("could not sign transaction: %w", err)
+		}
+	}
+
+	err = tx.SignEnvelope(u.Address(), u.Pub().ID, u.Signer())
 	if err != nil {
 		return flow.ZeroID, fmt.Errorf("could not sign envelope: %w", err)
 	}
@@ -135,38 +157,5 @@ func (u *User) ExecuteScript(script []byte) (flow.Identifier, error) {
 		return flow.ZeroID, fmt.Errorf("could not send transaction: %w", err)
 	}
 
-	u.Pub().SequenceNumber++
-
 	return tx.ID(), nil
-}
-
-func (u *User) GetEvent(txID flow.Identifier, etype string) (flow.Event, error) {
-
-Loop:
-	for {
-
-		time.Sleep(100 * time.Millisecond)
-
-		result, err := u.cli.GetTransactionResult(context.Background(), txID)
-		if err != nil {
-			return flow.Event{}, fmt.Errorf("could not get result: %w", err)
-		}
-
-		switch result.Status {
-		case flow.TransactionStatusUnknown, flow.TransactionStatusPending, flow.TransactionStatusExecuted:
-			continue Loop
-		case flow.TransactionStatusFinalized, flow.TransactionStatusSealed:
-			// continue in same iteration
-		default:
-			return flow.Event{}, fmt.Errorf("invalid transaction status (%s)", result.Status)
-		}
-
-		for _, event := range result.Events {
-			if event.Type == etype {
-				return event, nil
-			}
-		}
-
-		return flow.Event{}, fmt.Errorf("event type not found")
-	}
 }
