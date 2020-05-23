@@ -29,6 +29,8 @@ func NewPromise(cli *client.Client, txID flow.Identifier) *Promise {
 }
 
 func (p *Promise) seal() {
+	timeout := time.NewTimer(20 * time.Second)
+
 Loop:
 	for {
 		select {
@@ -36,6 +38,9 @@ Loop:
 			break Loop
 		case <-time.After(100 * time.Millisecond):
 			p.check()
+		case <-timeout.C:
+			close(p.done)
+			break Loop
 		}
 	}
 }
