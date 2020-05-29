@@ -13,13 +13,13 @@ type TransformFunc func([]byte) []byte
 
 func ReplaceImport(placeholder string, address flow.Address) TransformFunc {
 	return func(code []byte) []byte {
-		return bytes.ReplaceAll(code, []byte(fmt.Sprintf(" %s", placeholder)), []byte(fmt.Sprintf(" 0x%s", address.Short())))
+		return bytes.ReplaceAll(code, []byte(fmt.Sprintf(" %s", placeholder)), []byte(fmt.Sprintf(" 0x%s", address.Hex())))
 	}
 }
 
 func ReplaceRecipient(placeholder string, address flow.Address) TransformFunc {
 	return func(code []byte) []byte {
-		return bytes.ReplaceAll(code, []byte(fmt.Sprintf("getAccount(%s)", placeholder)), []byte(fmt.Sprintf("getAccount(0x%s)", address.Short())))
+		return bytes.ReplaceAll(code, []byte(fmt.Sprintf("getAccount(%s)", placeholder)), []byte(fmt.Sprintf("getAccount(0x%s)", address.Hex())))
 	}
 }
 

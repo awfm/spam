@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/onflow/flow-ft/contracts"
 	"github.com/onflow/flow-go-sdk/client"
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
@@ -22,9 +23,6 @@ const (
 	AllowedAmountPlaceholder  = "100.0"
 	MintAmountPlaceholder     = "10.0"
 	TransferAmountPlaceholder = "10.0"
-
-	FungibleTokenContract = "https://raw.githubusercontent.com/onflow/flow-ft/master/contracts/FungibleToken.cdc"
-	FlowTokenContract     = "https://raw.githubusercontent.com/onflow/flow-ft/master/contracts/FlowToken.cdc"
 
 	SetupAccountTransaction   = "https://raw.githubusercontent.com/onflow/flow-ft/master/transactions/setup_account.cdc"
 	MintTokensTransaction     = "https://raw.githubusercontent.com/onflow/flow-ft/master/transactions/mint_tokens.cdc"
@@ -61,12 +59,10 @@ func main() {
 
 	iface, err := root.RunCode(
 		ApplyTransforms(
-			LoadRemote(
-				cache,
-				FungibleTokenContract,
-			),
+			LoadBytes(contracts.FungibleToken()),
 			DeployContract(),
 		),
+		AddAuthorizer(root.Address()),
 	)
 	if err != nil {
 		log.Fatal().Err(err).Msg("could not deploy fungible token contract")
@@ -77,14 +73,11 @@ func main() {
 		log.Fatal().Err(err).Msg("could not get fungible token contract address")
 	}
 
-	log.Info().Str("address", ifaceAddress.Short()).Msg("fungible token contract deployed")
+	log.Info().Str("address", ifaceAddress.Hex()).Msg("fungible token contract deployed")
 
 	token, err := root.RunCode(
 		ApplyTransforms(
-			LoadRemote(
-				cache,
-				FlowTokenContract,
-			),
+			LoadBytes(contracts.FlowToken(ifaceAddress.Hex())),
 			ReplaceImport(FungibleTokenPlaceholder, ifaceAddress),
 			ReplaceAmount(AllowedAmountPlaceholder, 184467440737),
 			DeployContract(root.Pub()),
@@ -99,7 +92,7 @@ func main() {
 		log.Fatal().Err(err).Msg("could not get flow token contract address")
 	}
 
-	log.Info().Str("address", tokenAddress.Short()).Msg("flow token contract deployed")
+	log.Info().Str("address", tokenAddress.Hex()).Msg("flow token contract deployed")
 
 	var users []*User
 	for i := uint(0); i < *num; i++ {

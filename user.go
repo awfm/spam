@@ -23,7 +23,7 @@ func NewRoot(cli *client.Client, hex string) (*User, error) {
 		return nil, fmt.Errorf("could not decode private key: %w", err)
 	}
 
-	address := flow.HexToAddress("01")
+	address := flow.ServiceAddress(flow.Mainnet)
 	account, err := cli.GetAccount(context.Background(), address)
 	if err != nil {
 		return nil, fmt.Errorf("could not get account: %w", err)
@@ -83,7 +83,7 @@ func NewRandom(cli *client.Client, root *User) (*User, error) {
 }
 
 func (u *User) String() string {
-	return u.Address().Short()
+	return u.Address().Hex()
 }
 
 func (u *User) Address() flow.Address {

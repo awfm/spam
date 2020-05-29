@@ -46,6 +46,12 @@ func LoadRemote(cache *Cache, url string) LoadFunc {
 	}
 }
 
+func LoadBytes(data []byte) LoadFunc {
+	return func() ([]byte, error) {
+		return data, nil
+	}
+}
+
 func ApplyTransforms(load LoadFunc, transforms ...TransformFunc) LoadFunc {
 	return func() ([]byte, error) {
 

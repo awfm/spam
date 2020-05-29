@@ -59,8 +59,8 @@ func (p *Promise) check() {
 
 func (p *Promise) Address() (flow.Address, error) {
 	<-p.done
-	if p.result.Error != nil {
-		return flow.ZeroAddress, fmt.Errorf("could not execute transaction: %w", p.result.Error)
+	if p.Error() != nil {
+		return flow.Address{}, fmt.Errorf("could not execute transaction: %w", p.Error())
 	}
 	for _, event := range p.result.Events {
 		if event.Type == flow.EventAccountCreated {
@@ -68,10 +68,13 @@ func (p *Promise) Address() (flow.Address, error) {
 			return creation.Address(), nil
 		}
 	}
-	return flow.ZeroAddress, fmt.Errorf("transaction didn't create account")
+	return flow.Address{}, fmt.Errorf("transaction didn't create account")
 }
 
 func (p *Promise) Error() error {
 	<-p.done
+	if p.result == nil {
+		return fmt.Errorf("transaction was never sealed")
+	}
 	return p.result.Error
 }
